@@ -103,7 +103,7 @@ func (a *App) handlePrintPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	printers, err := FetchPrinters(a.cfg.ServerURL, a.cfg.Pin)
+	printers, err := FetchPrinters(a.cfg.ServerURL)
 	errMsg := ""
 	if err != nil {
 		errMsg = err.Error()
@@ -122,7 +122,7 @@ func (a *App) handlePrintPage(w http.ResponseWriter, r *http.Request) {
   {{range .Printers}}
   <label class="printer-opt">
     <input type="radio" name="printer_id" value="{{.ID}}" required>
-    <span class="dot {{if .Online}}dot-on{{else}}dot-off{{end}}"></span>
+    <span class="dot dot-on"></span>
     {{.Nama}} <span class="muted">({{.Lokasi}})</span>
   </label>
   {{end}}
