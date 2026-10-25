@@ -13,17 +13,22 @@ import (
 )
 
 type TeacherPrinter struct {
-	ID       int    `json:"id"`
-	Nama     string `json:"nama_printer"`
-	Lokasi   string `json:"lokasi"`
-	Online   bool   `json:"online"`
+	ID     int    `json:"id"`
+	Nama   string `json:"nama_printer"`
+	Lokasi string `json:"lokasi"`
 }
 
-// FetchPrinters panggil GET {server}/api/teacher/printers?pin=xxx
-// (endpoint baru, PIN-authenticated - lihat catatan di server)
-func FetchPrinters(serverURL, pin string) ([]TeacherPrinter, error) {
+type printersResponse struct {
+	OK       bool             `json:"ok"`
+	Printers []TeacherPrinter `json:"printers"`
+}
+
+// FetchPrinters panggil GET {server}/api/printers - endpoint ini sudah
+// otomatis cuma nampilin printer yang agent-nya online, dan tidak butuh
+// PIN (cuma nampilin nama+lokasi, bukan data sensitif).
+func FetchPrinters(serverURL string) ([]TeacherPrinter, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
-	url := fmt.Sprintf("%s/api/teacher/printers?pin=%s", serverURL, pin)
+	url := fmt.Sprintf("%s/api/printers", serverURL)
 
 	resp, err := client.Get(url)
 	if err != nil {
@@ -36,11 +41,14 @@ func FetchPrinters(serverURL, pin string) ([]TeacherPrinter, error) {
 		return nil, fmt.Errorf("server balas status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var printers []TeacherPrinter
-	if err := json.Unmarshal(body, &printers); err != nil {
+	var result printersResponse
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, err
 	}
-	return printers, nil
+	if !result.OK {
+		return nil, fmt.Errorf("server balas ok=false")
+	}
+	return result.Printers, nil
 }
 
 type SubmitResult struct {
