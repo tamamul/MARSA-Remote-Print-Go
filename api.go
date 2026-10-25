@@ -28,7 +28,7 @@ type printersResponse struct {
 // PIN (cuma nampilin nama+lokasi, bukan data sensitif).
 func FetchPrinters(serverURL string) ([]TeacherPrinter, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
-	url := fmt.Sprintf("%s/api/printers", serverURL)
+	url := fmt.Sprintf("%s/api/teacher/printers", serverURL)
 
 	resp, err := client.Get(url)
 	if err != nil {
