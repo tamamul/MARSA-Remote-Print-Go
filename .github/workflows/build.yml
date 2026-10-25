@@ -1,0 +1,35 @@
+name: Build MARSA Print Watcher Installer
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version: "1.24"
+
+    - name: Build watcher.exe
+      run: |
+        go mod tidy
+        go build -ldflags="-s -w -H windowsgui" -o installer/dist/watcher.exe
+
+    - name: Install Inno Setup
+      run: choco install innosetup -y
+      shell: pwsh
+
+    - name: Compile installer
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\watcher.iss
+      shell: pwsh
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: MarsaPrintWatcherSetup
+        path: installer/output/MarsaPrintWatcherSetup.exe
