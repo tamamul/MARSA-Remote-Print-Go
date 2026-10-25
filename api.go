@@ -13,7 +13,9 @@ import (
 )
 
 type TeacherPrinter struct {
-	ID     int    `json:"id"`
+	// Server balikin id sebagai string (hasil getResultArray() CI4, semua
+	// kolom jadi string), jadi tangkap sebagai string, bukan int.
+	ID     string `json:"id"`
 	Nama   string `json:"nama_printer"`
 	Lokasi string `json:"lokasi"`
 }
