@@ -2,34 +2,27 @@ package main
 
 import (
 	_ "embed"
-	"fmt"
 	"log"
-	"net/http"
+	"os"
 	"os/exec"
-	"runtime"
+	"path/filepath"
 
-	"github.com/getlantern/systray"
+	"github.com/lxn/walk"
 )
 
 //go:embed icon.ico
 var iconBytes []byte
 
-const dashboardPort = 9292
-
-type App struct {
-	cfg   *Config
-	queue *Queue
-}
-
-func logErr(format string, args ...interface{}) {
-	log.Printf(format, args...)
-}
-
-func openBrowser(url string) {
-	if runtime.GOOS != "windows" {
-		return
+// loadIcon tulis icon.ico ke temp file sekali, lalu load lewat walk.
+// (walk butuh path file, bukan bytes langsung)
+func loadIcon() (*walk.Icon, error) {
+	tmpFile := filepath.Join(os.TempDir(), "marsa-print-watcher.ico")
+	if _, err := os.Stat(tmpFile); os.IsNotExist(err) {
+		if err := os.WriteFile(tmpFile, iconBytes, 0644); err != nil {
+			return nil, err
+		}
 	}
-	_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	return walk.NewIconFromFile(tmpFile)
 }
 
 func main() {
@@ -38,53 +31,63 @@ func main() {
 		log.Fatalf("gagal load config: %v", err)
 	}
 
-	app := &App{cfg: cfg, queue: NewQueue()}
+	mw, err := walk.NewMainWindow()
+	if err != nil {
+		log.Fatal(err)
+	}
+	mw.SetVisible(false) // jendela utama cuma buat message loop, tidak kelihatan
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", app.handleHome)
-	mux.HandleFunc("/setup", app.handleSetup)
-	mux.HandleFunc("/print", app.handlePrintPage)
-	mux.HandleFunc("/submit", app.handleSubmit)
-
-	go func() {
-		addr := fmt.Sprintf("127.0.0.1:%d", dashboardPort)
-		if err := http.ListenAndServe(addr, mux); err != nil {
-			log.Printf("web server gagal start: %v", err)
-		}
-	}()
-
-	go watchFolder(cfg, app.queue, dashboardPort)
-
-	// Kalau setup belum diisi, langsung buka halaman setup sekali di awal
-	if !cfg.IsReady() {
-		openBrowser(fmt.Sprintf("http://127.0.0.1:%d/setup", dashboardPort))
+	icon, err := loadIcon()
+	if err != nil {
+		log.Fatalf("gagal load icon: %v", err)
 	}
 
-	systray.Run(func() {
-		systray.SetIcon(iconBytes)
-		systray.SetTitle("MARSA Print")
-		systray.SetTooltip("MARSA Print - klik kanan untuk menu")
+	ni, err := walk.NewNotifyIcon(mw)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ni.Dispose()
+	_ = ni.SetIcon(icon)
+	_ = ni.SetToolTip("MARSA Print")
+	_ = ni.SetVisible(true)
 
-		mOpen := systray.AddMenuItem("Buka MARSA Print", "Lihat status")
-		mFolder := systray.AddMenuItem("Buka Folder Cetak", "Tempat simpan PDF dari Word/Excel")
-		mSetup := systray.AddMenuItem("Setting", "Ubah URL server / PIN")
-		systray.AddSeparator()
-		mQuit := systray.AddMenuItem("Keluar", "Tutup MARSA Print")
+	menu := ni.ContextMenu()
 
-		go func() {
-			for {
-				select {
-				case <-mOpen.ClickedCh:
-					openBrowser(fmt.Sprintf("http://127.0.0.1:%d/", dashboardPort))
-				case <-mFolder.ClickedCh:
-					_ = exec.Command("explorer", cfg.WatchDir).Start()
-				case <-mSetup.ClickedCh:
-					openBrowser(fmt.Sprintf("http://127.0.0.1:%d/setup", dashboardPort))
-				case <-mQuit.ClickedCh:
-					systray.Quit()
-					return
-				}
-			}
-		}()
-	}, func() {})
+	actFolder := walk.NewAction()
+	_ = actFolder.SetText("Buka Folder Cetak")
+	actFolder.Triggered().Attach(func() {
+		_ = exec.Command("explorer", cfg.WatchDir).Start()
+	})
+	_ = menu.Actions().Add(actFolder)
+
+	actSetup := walk.NewAction()
+	_ = actSetup.SetText("Setting")
+	actSetup.Triggered().Attach(func() {
+		showSetupDialog(mw, cfg)
+	})
+	_ = menu.Actions().Add(actSetup)
+
+	_ = menu.Actions().Add(walk.NewSeparatorAction())
+
+	actExit := walk.NewAction()
+	_ = actExit.SetText("Keluar")
+	actExit.Triggered().Attach(func() {
+		walk.App().Exit(0)
+	})
+	_ = menu.Actions().Add(actExit)
+
+	// Klik ganti ikon = buka Setting (perilaku umum tray app)
+	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
+		if button == walk.LeftButton {
+			showSetupDialog(mw, cfg)
+		}
+	})
+
+	if !cfg.IsReady() {
+		showSetupDialog(mw, cfg)
+	}
+
+	go watchFolder(cfg, mw)
+
+	mw.Run()
 }
