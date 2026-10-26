@@ -1,0 +1,132 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+
+	"github.com/lxn/walk"
+	. "github.com/lxn/walk/declarative"
+)
+
+// showSetupDialog dipanggil sekali di awal (kalau config belum diisi) atau
+// lewat menu tray "Setting". Jendela native biasa, OK-nya nyimpen config.
+func showSetupDialog(owner walk.Form, cfg *Config) {
+	var dlg *walk.Dialog
+	var serverEdit, pinEdit *walk.LineEdit
+
+	Dialog{
+		AssignTo: &dlg,
+		Title:    "Setup MARSA Print",
+		MinSize:  Size{Width: 360, Height: 180},
+		Layout:   VBox{},
+		Children: []Widget{
+			Label{Text: "URL Server:"},
+			LineEdit{AssignTo: &serverEdit, Text: cfg.ServerURL},
+			Label{Text: "PIN Guru (5 digit):"},
+			LineEdit{AssignTo: &pinEdit, Text: cfg.Pin, PasswordMode: true},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					PushButton{
+						Text: "Simpan",
+						OnClicked: func() {
+							cfg.ServerURL = serverEdit.Text()
+							cfg.Pin = pinEdit.Text()
+							_ = cfg.Save()
+							dlg.Accept()
+						},
+					},
+					PushButton{Text: "Batal", OnClicked: func() { dlg.Cancel() }},
+				},
+			},
+		},
+	}.Run(owner)
+}
+
+// showPrintDialog muncul otomatis tiap ada PDF baru terdeteksi di folder.
+// Guru pilih printer dari dropdown + jumlah copy, lalu klik Cetak.
+func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, printers []TeacherPrinter) {
+	var dlg *walk.Dialog
+	var combo *walk.ComboBox
+	var copiesEdit *walk.NumberEdit
+	var statusLbl *walk.Label
+	var printBtn, cancelBtn *walk.PushButton
+
+	names := make([]string, len(printers))
+	for i, p := range printers {
+		names[i] = fmt.Sprintf("%s  (%s)", p.Nama, p.Lokasi)
+	}
+
+	Dialog{
+		AssignTo: &dlg,
+		Title:    "Cetak Dokumen",
+		MinSize:  Size{Width: 380, Height: 220},
+		Layout:   VBox{},
+		Children: []Widget{
+			Label{Text: item.FileName, Font: Font{Bold: true}},
+			Label{Text: "Pilih Printer:"},
+			ComboBox{AssignTo: &combo, Model: names, CurrentIndex: 0},
+			Label{Text: "Jumlah Copy:"},
+			NumberEdit{AssignTo: &copiesEdit, Value: 1, MinValue: 1, MaxValue: 50, Decimals: 0},
+			Label{AssignTo: &statusLbl, Text: ""},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					PushButton{
+						AssignTo: &printBtn,
+						Text:     "Cetak",
+						OnClicked: func() {
+							idx := combo.CurrentIndex()
+							if idx < 0 {
+								return
+							}
+							printerID, err := strconv.Atoi(printers[idx].ID)
+							if err != nil {
+								walk.MsgBox(dlg, "Error", "ID printer tidak valid.", walk.MsgBoxIconError)
+								return
+							}
+							copies := int(copiesEdit.Value())
+
+							printBtn.SetEnabled(false)
+							cancelBtn.SetEnabled(false)
+							statusLbl.SetText("Mengirim ke server...")
+
+							go submitAndClose(owner, dlg, statusLbl, printBtn, cancelBtn, cfg, item, printerID, copies)
+						},
+					},
+					PushButton{AssignTo: &cancelBtn, Text: "Batal", OnClicked: func() { dlg.Cancel() }},
+				},
+			},
+		},
+	}.Run(owner)
+}
+
+// submitAndClose jalan di goroutine terpisah (biar jendela tidak freeze
+// pas upload), lalu balik ke UI thread lewat Synchronize buat update dialog.
+func submitAndClose(owner *walk.MainWindow, dlg *walk.Dialog, statusLbl *walk.Label, printBtn, cancelBtn *walk.PushButton, cfg *Config, item *PendingFile, printerID, copies int) {
+	result, err := SubmitJob(cfg.ServerURL, cfg.Pin, item.Path, printerID, copies)
+
+	owner.Synchronize(func() {
+		if err != nil {
+			statusLbl.SetText("Gagal: " + err.Error())
+			printBtn.SetEnabled(true)
+			cancelBtn.SetEnabled(true)
+			return
+		}
+
+		dest := filepath.Join(cfg.SentDir, fmt.Sprintf("%d_%s", time.Now().Unix(), item.FileName))
+		_ = os.Rename(item.Path, dest)
+
+		walk.MsgBox(dlg, "Berhasil",
+			"Dokumen masuk antrean cetak ke "+result.Job.PrinterName+".\n\n"+
+				"Catatan: ini baru status ANTREAN, bukan konfirmasi sudah tercetak - "+
+				"terutama untuk printer di lokasi lain, prosesnya masih nunggu Agent di sana ambil & cetak job-nya.",
+			walk.MsgBoxIconInformation)
+		dlg.Accept()
+	})
+}
