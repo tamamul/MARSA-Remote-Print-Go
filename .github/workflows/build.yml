@@ -1,8 +1,7 @@
 name: Build MARSA Print Watcher Installer
 
 on:
-  push:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
