@@ -19,6 +19,7 @@ type PendingFile struct {
 
 // watchFolder pantau folder "incoming" terus-menerus di goroutine terpisah.
 func watchFolder(cfg *Config, mw *walk.MainWindow) {
+	defer recoverLog("watchFolder")
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Printf("gagal buat file watcher: %v", err)
@@ -43,6 +44,7 @@ func watchFolder(cfg *Config, mw *walk.MainWindow) {
 			if !strings.EqualFold(filepath.Ext(event.Name), ".pdf") {
 				continue
 			}
+			log.Printf("PDF terdeteksi: %s", event.Name)
 			go handleNewFile(event.Name, cfg, mw)
 
 		case err, ok := <-watcher.Errors:
@@ -58,6 +60,7 @@ func watchFolder(cfg *Config, mw *walk.MainWindow) {
 // tampilkan dialog native lewat Synchronize (wajib - operasi UI walk cuma
 // boleh dari thread yang sama dengan message loop).
 func handleNewFile(path string, cfg *Config, mw *walk.MainWindow) {
+	defer recoverLog("handleNewFile")
 	if !waitUntilStable(path) {
 		return
 	}
@@ -71,6 +74,7 @@ func handleNewFile(path string, cfg *Config, mw *walk.MainWindow) {
 	printers, err := FetchPrinters(cfg.ServerURL)
 
 	mw.Synchronize(func() {
+		defer recoverLog("dialog cetak")
 		if err != nil {
 			walk.MsgBox(mw, "Gagal", "Gagal ambil daftar printer:\n"+err.Error(), walk.MsgBoxIconError)
 			return
