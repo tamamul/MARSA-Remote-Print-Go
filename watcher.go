@@ -1,108 +1,93 @@
 package main
 
 import (
+	_ "embed"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/lxn/walk"
 )
 
-type PendingFile struct {
-	Path       string
-	FileName   string
-	DetectedAt time.Time
+//go:embed icon.ico
+var iconBytes []byte
+
+// loadIcon tulis icon.ico ke temp file sekali, lalu load lewat walk.
+// (walk butuh path file, bukan bytes langsung)
+func loadIcon() (*walk.Icon, error) {
+	tmpFile := filepath.Join(os.TempDir(), "marsa-print-watcher.ico")
+	if _, err := os.Stat(tmpFile); os.IsNotExist(err) {
+		if err := os.WriteFile(tmpFile, iconBytes, 0644); err != nil {
+			return nil, err
+		}
+	}
+	return walk.NewIconFromFile(tmpFile)
 }
 
-// watchFolder pantau folder "incoming" terus-menerus di goroutine terpisah.
-func watchFolder(cfg *Config, mw *walk.MainWindow) {
-	watcher, err := fsnotify.NewWatcher()
+func main() {
+	cfg, err := loadOrInitConfig()
 	if err != nil {
-		log.Printf("gagal buat file watcher: %v", err)
-		return
-	}
-	defer watcher.Close()
-
-	if err := watcher.Add(cfg.WatchDir); err != nil {
-		log.Printf("gagal pantau folder %s: %v", cfg.WatchDir, err)
-		return
+		log.Fatalf("gagal load config: %v", err)
 	}
 
-	for {
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			if event.Op&(fsnotify.Create|fsnotify.Write) == 0 {
-				continue
-			}
-			if !strings.EqualFold(filepath.Ext(event.Name), ".pdf") {
-				continue
-			}
-			go handleNewFile(event.Name, cfg, mw)
-
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			log.Printf("file watcher error: %v", err)
-		}
+	mw, err := walk.NewMainWindow()
+	if err != nil {
+		log.Fatal(err)
 	}
-}
+	mw.SetVisible(false) // jendela utama cuma buat message loop, tidak kelihatan
 
-// handleNewFile tunggu file selesai ditulis, ambil daftar printer, lalu
-// tampilkan dialog native lewat Synchronize (wajib - operasi UI walk cuma
-// boleh dari thread yang sama dengan message loop).
-func handleNewFile(path string, cfg *Config, mw *walk.MainWindow) {
-	if !waitUntilStable(path) {
-		return
+	icon, err := loadIcon()
+	if err != nil {
+		log.Fatalf("gagal load icon: %v", err)
 	}
 
-	item := &PendingFile{
-		Path:       path,
-		FileName:   filepath.Base(path),
-		DetectedAt: time.Now(),
+	ni, err := walk.NewNotifyIcon(mw)
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer ni.Dispose()
+	_ = ni.SetIcon(icon)
+	_ = ni.SetToolTip("MARSA Print")
+	_ = ni.SetVisible(true)
 
-	printers, err := FetchPrinters(cfg.ServerURL)
+	menu := ni.ContextMenu()
 
-	mw.Synchronize(func() {
-		if err != nil {
-			walk.MsgBox(mw, "Gagal", "Gagal ambil daftar printer:\n"+err.Error(), walk.MsgBoxIconError)
-			return
-		}
-		if len(printers) == 0 {
-			walk.MsgBox(mw, "Info", "Tidak ada printer yang online saat ini.", walk.MsgBoxIconInformation)
-			return
-		}
-		showPrintDialog(mw, cfg, item, printers)
+	actFolder := walk.NewAction()
+	_ = actFolder.SetText("Buka Folder Cetak")
+	actFolder.Triggered().Attach(func() {
+		_ = exec.Command("explorer", cfg.WatchDir).Start()
 	})
-}
+	_ = menu.Actions().Add(actFolder)
 
-func waitUntilStable(path string) bool {
-	var lastSize int64 = -1
-	stableCount := 0
+	actSetup := walk.NewAction()
+	_ = actSetup.SetText("Setting")
+	actSetup.Triggered().Attach(func() {
+		showSetupDialog(mw, cfg)
+	})
+	_ = menu.Actions().Add(actSetup)
 
-	for i := 0; i < 30; i++ { // maksimal nunggu ~15 detik
-		info, err := os.Stat(path)
-		if err != nil {
-			time.Sleep(500 * time.Millisecond)
-			continue
+	_ = menu.Actions().Add(walk.NewSeparatorAction())
+
+	actExit := walk.NewAction()
+	_ = actExit.SetText("Keluar")
+	actExit.Triggered().Attach(func() {
+		walk.App().Exit(0)
+	})
+	_ = menu.Actions().Add(actExit)
+
+	// Klik ganti ikon = buka Setting (perilaku umum tray app)
+	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
+		if button == walk.LeftButton {
+			showSetupDialog(mw, cfg)
 		}
-		if info.Size() == lastSize && info.Size() > 0 {
-			stableCount++
-			if stableCount >= 2 {
-				return true
-			}
-		} else {
-			stableCount = 0
-		}
-		lastSize = info.Size()
-		time.Sleep(500 * time.Millisecond)
+	})
+
+	if !cfg.IsReady() {
+		showSetupDialog(mw, cfg)
 	}
-	return lastSize > 0
+
+	go watchFolder(cfg, mw)
+
+	mw.Run()
 }
