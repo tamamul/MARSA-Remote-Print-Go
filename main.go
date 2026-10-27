@@ -6,9 +6,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 
 	"github.com/lxn/walk"
 )
+
+// recoverLog dipasang pakai defer di tiap goroutine/callback UI. Tanpa ini,
+// panic di goroutine mana pun mematikan seluruh proses secara diam-diam
+// (build windowsgui tidak punya console). Dengan ini, penyebabnya masuk watcher.log.
+func recoverLog(where string) {
+	if r := recover(); r != nil {
+		log.Printf("PANIC di %s: %v\n%s", where, r, debug.Stack())
+	}
+}
 
 //go:embed icon.ico
 var iconBytes []byte
@@ -77,6 +87,7 @@ func main() {
 	actSetup := walk.NewAction()
 	_ = actSetup.SetText("Setting")
 	actSetup.Triggered().Attach(func() {
+		defer recoverLog("menu setting")
 		showSetupDialog(mw, cfg)
 	})
 	_ = menu.Actions().Add(actSetup)
@@ -93,12 +104,18 @@ func main() {
 	// Klik ganti ikon = buka Setting (perilaku umum tray app)
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
+			defer recoverLog("klik tray")
 			showSetupDialog(mw, cfg)
 		}
 	})
 
+	// Jangan buka dialog sebelum message loop jalan; tunda lewat Synchronize
+	// supaya dialog muncul SETELAH mw.Run() aktif.
 	if !cfg.IsReady() {
-		showSetupDialog(mw, cfg)
+		mw.Synchronize(func() {
+			defer recoverLog("setup awal")
+			showSetupDialog(mw, cfg)
+		})
 	}
 
 	go watchFolder(cfg, mw)
