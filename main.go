@@ -20,6 +20,10 @@ func recoverLog(where string) {
 	}
 }
 
+// buildTag: ubah tiap kali ada perbaikan, supaya watcher.log menunjukkan
+// versi build mana yang sebenarnya sedang jalan.
+const buildTag = "2026-10-27-owner-nil-layout"
+
 //go:embed icon.ico
 var iconBytes []byte
 
@@ -44,11 +48,16 @@ func main() {
 			log.SetOutput(f)
 		}
 	}
+	log.Printf("=== watcher start, build=%s ===", buildTag)
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("PANIC: %v", r)
 		}
 	}()
+
+	// Penanda versi: kalau log berikutnya tidak memuat baris ini, berarti
+	// yang jalan masih .exe lama (bukan build terbaru).
+	log.Printf("watcher mulai - build layout-fix-1")
 
 	cfg, err := loadOrInitConfig()
 	if err != nil {
