@@ -44,7 +44,7 @@ func showSetupDialog(owner walk.Form, cfg *Config) {
 				},
 			},
 		},
-	}.Run(owner)
+	}.Run(nil) // owner nil: lihat catatan di main.go
 }
 
 // showPrintDialog muncul otomatis tiap ada PDF baru terdeteksi di folder.
@@ -103,7 +103,7 @@ func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, pri
 				},
 			},
 		},
-	}.Run(owner)
+	}.Run(nil) // owner nil: lihat catatan di main.go
 }
 
 // submitAndClose jalan di goroutine terpisah (biar jendela tidak freeze
