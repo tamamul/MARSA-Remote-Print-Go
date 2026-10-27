@@ -14,6 +14,7 @@ import (
 // showSetupDialog dipanggil sekali di awal (kalau config belum diisi) atau
 // lewat menu tray "Setting". Jendela native biasa, OK-nya nyimpen config.
 func showSetupDialog(owner walk.Form, cfg *Config) {
+	defer owner.SetVisible(false) // pengaman: jendela utama harus tetap tersembunyi
 	var dlg *walk.Dialog
 	var serverEdit, pinEdit *walk.LineEdit
 
@@ -50,6 +51,7 @@ func showSetupDialog(owner walk.Form, cfg *Config) {
 // showPrintDialog muncul otomatis tiap ada PDF baru terdeteksi di folder.
 // Guru pilih printer dari dropdown + jumlah copy, lalu klik Cetak.
 func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, printers []TeacherPrinter) {
+	defer owner.SetVisible(false) // pengaman: jendela utama harus tetap tersembunyi
 	var dlg *walk.Dialog
 	var combo *walk.ComboBox
 	var copiesEdit *walk.NumberEdit
