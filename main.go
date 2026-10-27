@@ -59,7 +59,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	mw.SetVisible(false) // jendela utama cuma buat message loop, tidak kelihatan
+	// Jendela utama cuma buat message loop + tray, tidak boleh kelihatan.
+	// Layout wajib di-set: tanpa layout, walk panic (nil pointer di
+	// CreateLayoutItem) setiap kali jendela ini menerima WM_WINDOWPOSCHANGED.
+	_ = mw.SetLayout(walk.NewVBoxLayout())
+	mw.SetVisible(false)
 
 	icon, err := loadIcon()
 	if err != nil {
