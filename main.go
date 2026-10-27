@@ -26,6 +26,20 @@ func loadIcon() (*walk.Icon, error) {
 }
 
 func main() {
+	// Build pakai -H windowsgui (tanpa console), jadi error harus ke file log
+	// supaya kalau tray tidak muncul, penyebabnya bisa dilihat di
+	// %APPDATA%\MarsaPrintWatcher\watcher.log
+	if dir, err := configDir(); err == nil {
+		if f, err := os.OpenFile(filepath.Join(dir, "watcher.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+			log.SetOutput(f)
+		}
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC: %v", r)
+		}
+	}()
+
 	cfg, err := loadOrInitConfig()
 	if err != nil {
 		log.Fatalf("gagal load config: %v", err)
