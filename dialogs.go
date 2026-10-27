@@ -67,7 +67,7 @@ func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, pri
 		MinSize:  Size{Width: 380, Height: 220},
 		Layout:   VBox{},
 		Children: []Widget{
-			Label{Text: item.FileName, Font: Font{Bold: true}},
+			Label{Text: item.FileName, Font: Font{Family: "Segoe UI", PointSize: 10, Bold: true}},
 			Label{Text: "Pilih Printer:"},
 			ComboBox{AssignTo: &combo, Model: names, CurrentIndex: 0},
 			Label{Text: "Jumlah Copy:"},
