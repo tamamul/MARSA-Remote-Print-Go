@@ -76,11 +76,11 @@ func handleNewFile(path string, cfg *Config, mw *walk.MainWindow) {
 	mw.Synchronize(func() {
 		defer recoverLog("dialog cetak")
 		if err != nil {
-			walk.MsgBox(mw, "Gagal", "Gagal ambil daftar printer:\n"+err.Error(), walk.MsgBoxIconError)
+			walk.MsgBox(nil, "Gagal", "Gagal ambil daftar printer:\n"+err.Error(), walk.MsgBoxIconError)
 			return
 		}
 		if len(printers) == 0 {
-			walk.MsgBox(mw, "Info", "Tidak ada printer yang online saat ini.", walk.MsgBoxIconInformation)
+			walk.MsgBox(nil, "Info", "Tidak ada printer yang online saat ini.", walk.MsgBoxIconInformation)
 			return
 		}
 		showPrintDialog(mw, cfg, item, printers)
