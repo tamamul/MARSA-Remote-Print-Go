@@ -5,12 +5,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 )
+
+// inFlight mencegah satu file diproses berkali-kali. Satu kali "Save As"
+// menghasilkan beberapa event fsnotify (Create + Write berulang) - di log
+// terlihat 4x "PDF terdeteksi" untuk satu file, yang bikin 4 dialog muncul.
+var inFlight sync.Map
 
 type PendingFile struct {
 	Path       string
@@ -45,6 +51,9 @@ func watchFolder(cfg *Config, mw *walk.MainWindow) {
 			if !strings.EqualFold(filepath.Ext(event.Name), ".pdf") {
 				continue
 			}
+			if _, already := inFlight.LoadOrStore(event.Name, true); already {
+				continue // file ini sedang diproses, abaikan event duplikat
+			}
 			log.Printf("PDF terdeteksi: %s", event.Name)
 			go handleNewFile(event.Name, cfg, mw)
 
@@ -63,6 +72,7 @@ func watchFolder(cfg *Config, mw *walk.MainWindow) {
 func handleNewFile(path string, cfg *Config, mw *walk.MainWindow) {
 	defer recoverLog("handleNewFile")
 	if !waitUntilStable(path) {
+		inFlight.Delete(path)
 		return
 	}
 
@@ -81,6 +91,7 @@ func handleNewFile(path string, cfg *Config, mw *walk.MainWindow) {
 	}
 
 	mw.Synchronize(func() {
+		defer inFlight.Delete(path) // lepas penanda setelah dialog selesai/ditutup
 		defer recoverLog("dialog cetak")
 		if err != nil {
 			walk.MsgBox(nil, "Gagal", "Gagal ambil daftar printer:\n"+err.Error(), walk.MsgBoxIconError|walk.MsgBoxStyle(win.MB_TOPMOST))
