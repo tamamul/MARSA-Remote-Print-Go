@@ -143,6 +143,9 @@ func submitAndClose(owner *walk.MainWindow, dlg *walk.Dialog, statusLbl *walk.La
 	}
 
 	owner.Synchronize(func() {
+		// Wajib: kalau dialog ditutup lewat tombol X selama upload berjalan,
+		// widget sudah dibuang dan SetText di bawah bisa panic.
+		defer recoverLog("submit selesai")
 		if err != nil {
 			statusLbl.SetText("Gagal: " + err.Error())
 			printBtn.SetEnabled(true)
@@ -151,7 +154,9 @@ func submitAndClose(owner *walk.MainWindow, dlg *walk.Dialog, statusLbl *walk.La
 		}
 
 		dest := filepath.Join(cfg.SentDir, fmt.Sprintf("%d_%s", time.Now().Unix(), item.FileName))
-		_ = os.Rename(item.Path, dest)
+		if err := os.Rename(item.Path, dest); err != nil {
+			log.Printf("gagal memindahkan file ke arsip: %v", err)
+		}
 
 		walk.MsgBox(dlg, "Berhasil",
 			"Dokumen masuk antrean cetak ke "+result.Job.PrinterName+".\n\n"+
