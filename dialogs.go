@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,7 +10,28 @@ import (
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 )
+
+// bringToFront: dialog dari proses background (watcher) gampang "tenggelam"
+// di belakang Word karena Windows melarang app non-aktif merebut fokus.
+// Dibuat TOPMOST supaya pasti kelihatan walau tidak bisa merebut fokus.
+func bringToFront(dlg *walk.Dialog) {
+	h := dlg.Handle()
+	win.SetWindowPos(h, win.HWND_TOPMOST, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_SHOWWINDOW)
+	win.SetForegroundWindow(h)
+}
+
+// runOnTop menggantikan Dialog{...}.Run(nil): dialog dibuat dulu, lalu
+// dipasang handler Starting supaya langsung dibawa ke depan.
+func runOnTop(d Dialog, dlg **walk.Dialog) {
+	if err := d.Create(nil); err != nil {
+		log.Printf("gagal membuat dialog: %v", err)
+		return
+	}
+	(*dlg).Starting().Attach(func() { bringToFront(*dlg) })
+	(*dlg).Run()
+}
 
 // showSetupDialog dipanggil sekali di awal (kalau config belum diisi) atau
 // lewat menu tray "Setting". Jendela native biasa, OK-nya nyimpen config.
@@ -18,7 +40,7 @@ func showSetupDialog(owner walk.Form, cfg *Config) {
 	var dlg *walk.Dialog
 	var serverEdit, pinEdit *walk.LineEdit
 
-	Dialog{
+	runOnTop(Dialog{
 		AssignTo: &dlg,
 		Title:    "Setup MARSA Print",
 		MinSize:  Size{Width: 360, Height: 180},
@@ -45,7 +67,7 @@ func showSetupDialog(owner walk.Form, cfg *Config) {
 				},
 			},
 		},
-	}.Run(nil) // owner nil: lihat catatan di main.go
+	}, &dlg)
 }
 
 // showPrintDialog muncul otomatis tiap ada PDF baru terdeteksi di folder.
@@ -63,7 +85,7 @@ func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, pri
 		names[i] = fmt.Sprintf("%s  (%s)", p.Nama, p.Lokasi)
 	}
 
-	Dialog{
+	runOnTop(Dialog{
 		AssignTo: &dlg,
 		Title:    "Cetak Dokumen",
 		MinSize:  Size{Width: 380, Height: 220},
@@ -105,13 +127,19 @@ func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, pri
 				},
 			},
 		},
-	}.Run(nil) // owner nil: lihat catatan di main.go
+	}, &dlg)
 }
 
 // submitAndClose jalan di goroutine terpisah (biar jendela tidak freeze
 // pas upload), lalu balik ke UI thread lewat Synchronize buat update dialog.
 func submitAndClose(owner *walk.MainWindow, dlg *walk.Dialog, statusLbl *walk.Label, printBtn, cancelBtn *walk.PushButton, cfg *Config, item *PendingFile, printerID, copies int) {
+	log.Printf("submit job: file=%s printer_id=%d copies=%d", item.FileName, printerID, copies)
 	result, err := SubmitJob(cfg.ServerURL, cfg.Pin, item.Path, printerID, copies)
+	if err != nil {
+		log.Printf("submit job GAGAL: %v", err)
+	} else {
+		log.Printf("submit job OK: job_id=%d status=%s", result.Job.ID, result.Job.Status)
+	}
 
 	owner.Synchronize(func() {
 		if err != nil {
