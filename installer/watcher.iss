@@ -20,12 +20,12 @@ ArchitecturesInstallIn64BitMode=x64
 Source: "dist\watcher.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{userstartup}\MARSA Print Watcher"; Filename: "{app}\watcher.exe"
+Name: "{commonstartup}\MARSA Print Watcher"; Filename: "{app}\watcher.exe"
 
 [Run]
 ; Daftarkan printer virtual "MARSA Print Server" pakai driver bawaan
 ; Windows "Microsoft Print To PDF" - tidak perlu driver tambahan apapun.
-Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Add-Printer -Name 'MARSA Print Server' -DriverName 'Microsoft Print To PDF' -PortName 'PORTPROMPT:'"""; Flags: runhidden waituntilterminated; StatusMsg: "Mendaftarkan printer virtual..."
+Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Add-Printer -Name 'MARSA Print Server' -DriverName 'Microsoft Print To PDF' -PortName 'PORTPROMPT:' -ErrorAction SilentlyContinue"""; Flags: runhidden waituntilterminated; StatusMsg: "Mendaftarkan printer virtual..."
 ; Jalankan watcher sekarang juga (tanpa tunggu login ulang)
 Filename: "{app}\watcher.exe"; Flags: nowait postinstall skipifsilent runasoriginaluser; Description: "Jalankan MARSA Print Watcher sekarang"
 
@@ -34,4 +34,16 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Remove-Printer -N
 Filename: "{cmd}"; Parameters: "/C taskkill /IM watcher.exe /F"; Flags: runhidden; RunOnceId: "KillWatcher"
 
 [UninstallDelete]
-Type: files; Name: "{userstartup}\MARSA Print Watcher.lnk"
+Type: files; Name: "{commonstartup}\MARSA Print Watcher.lnk"
+
+[Code]
+// Matikan watcher.exe yang sedang jalan sebelum file dicopy. File .exe yang
+// sedang berjalan terkunci Windows, jadi tanpa ini install ulang diam-diam
+// gagal menimpa dan yang jalan tetap versi lama.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM watcher.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;
