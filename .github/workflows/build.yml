@@ -16,8 +16,15 @@ jobs:
 
     - name: Embed manifest (wajib untuk lxn/walk)
       run: |
-        go install github.com/akavel/rsrc@latest
-        & "$(go env GOPATH)\bin\rsrc.exe" -manifest watcher.manifest -o rsrc_windows_amd64.syso
+        go install github.com/akavel/rsrc@v0.10.2
+        $rsrc = "$(go env GOPATH)\bin\rsrc.exe"
+        # Coba sekalian tanam ikon ke .exe; kalau format ico ditolak, lanjut tanpa ikon
+        & $rsrc -manifest watcher.manifest -ico icon.ico -o rsrc_windows_amd64.syso
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "rsrc dengan -ico gagal, ulangi tanpa ikon"
+          & $rsrc -manifest watcher.manifest -o rsrc_windows_amd64.syso
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+        }
       shell: pwsh
 
     - name: Build watcher.exe
