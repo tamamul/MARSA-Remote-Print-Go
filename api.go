@@ -25,9 +25,9 @@ type printersResponse struct {
 	Printers []TeacherPrinter `json:"printers"`
 }
 
-// FetchPrinters panggil GET {server}/api/printers - endpoint ini sudah
-// otomatis cuma nampilin printer yang agent-nya online, dan tidak butuh
-// PIN (cuma nampilin nama+lokasi, bukan data sensitif).
+// FetchPrinters panggil GET {server}/api/teacher/printers - endpoint ini
+// sudah otomatis cuma nampilin printer yang agent-nya online, dan tidak
+// butuh PIN (cuma nampilin nama+lokasi, bukan data sensitif).
 func FetchPrinters(serverURL string) ([]TeacherPrinter, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	url := fmt.Sprintf("%s/api/teacher/printers", serverURL)
@@ -56,7 +56,10 @@ func FetchPrinters(serverURL string) ([]TeacherPrinter, error) {
 type SubmitResult struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
-	Job     struct {
+	// Server pakai key "error" (bukan "message") untuk semua penolakan:
+	// PIN salah, kuota habis, printer offline, dst.
+	Error string `json:"error"`
+	Job   struct {
 		ID           int    `json:"id"`
 		Status       string `json:"status"`
 		PrinterName  string `json:"printer_name"`
@@ -104,10 +107,26 @@ func SubmitJob(serverURL, pin, filePath string, printerID, copies int) (*SubmitR
 	respBody, _ := io.ReadAll(resp.Body)
 	var result SubmitResult
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("balasan server tidak terbaca: %s", string(respBody))
+		return nil, fmt.Errorf("balasan server tidak terbaca (HTTP %d): %s", resp.StatusCode, truncate(string(respBody), 200))
 	}
 	if !result.OK {
-		return &result, fmt.Errorf("server menolak: %s", result.Message)
+		reason := result.Error
+		if reason == "" {
+			reason = result.Message
+		}
+		if reason == "" {
+			reason = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
+		return &result, fmt.Errorf("server menolak: %s", reason)
 	}
 	return &result, nil
+}
+
+// truncate memotong teks panjang (misal halaman error HTML dari proxy)
+// supaya pesan di dialog tetap terbaca.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
