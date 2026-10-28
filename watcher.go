@@ -9,6 +9,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/lxn/walk"
+	"github.com/lxn/win"
 )
 
 type PendingFile struct {
@@ -71,16 +72,22 @@ func handleNewFile(path string, cfg *Config, mw *walk.MainWindow) {
 		DetectedAt: time.Now(),
 	}
 
+	log.Printf("file stabil: %s, ambil daftar printer...", item.FileName)
 	printers, err := FetchPrinters(cfg.ServerURL)
+	if err != nil {
+		log.Printf("FetchPrinters GAGAL: %v", err)
+	} else {
+		log.Printf("FetchPrinters OK: %d printer online", len(printers))
+	}
 
 	mw.Synchronize(func() {
 		defer recoverLog("dialog cetak")
 		if err != nil {
-			walk.MsgBox(nil, "Gagal", "Gagal ambil daftar printer:\n"+err.Error(), walk.MsgBoxIconError)
+			walk.MsgBox(nil, "Gagal", "Gagal ambil daftar printer:\n"+err.Error(), walk.MsgBoxIconError|walk.MsgBoxStyle(win.MB_TOPMOST))
 			return
 		}
 		if len(printers) == 0 {
-			walk.MsgBox(nil, "Info", "Tidak ada printer yang online saat ini.", walk.MsgBoxIconInformation)
+			walk.MsgBox(nil, "Info", "Tidak ada printer yang online saat ini.", walk.MsgBoxIconInformation|walk.MsgBoxStyle(win.MB_TOPMOST))
 			return
 		}
 		showPrintDialog(mw, cfg, item, printers)
