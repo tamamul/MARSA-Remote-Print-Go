@@ -1,133 +1,168 @@
 package main
 
 import (
-	_ "embed"
+	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime/debug"
+	"strconv"
+	"time"
 
 	"github.com/lxn/walk"
+	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 )
 
-// recoverLog dipasang pakai defer di tiap goroutine/callback UI. Tanpa ini,
-// panic di goroutine mana pun mematikan seluruh proses secara diam-diam
-// (build windowsgui tidak punya console). Dengan ini, penyebabnya masuk watcher.log.
-func recoverLog(where string) {
-	if r := recover(); r != nil {
-		log.Printf("PANIC di %s: %v\n%s", where, r, debug.Stack())
-	}
+// bringToFront: dialog dari proses background (watcher) gampang "tenggelam"
+// di belakang Word karena Windows melarang app non-aktif merebut fokus.
+// Dibuat TOPMOST supaya pasti kelihatan walau tidak bisa merebut fokus.
+func bringToFront(dlg *walk.Dialog) {
+	h := dlg.Handle()
+	win.SetWindowPos(h, win.HWND_TOPMOST, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_SHOWWINDOW)
+	win.SetForegroundWindow(h)
 }
 
-// buildTag: ubah tiap kali ada perbaikan, supaya watcher.log menunjukkan
-// versi build mana yang sebenarnya sedang jalan.
-const buildTag = "2026-10-28-review-fixes"
-
-//go:embed icon.ico
-var iconBytes []byte
-
-// loadIcon tulis icon.ico ke temp file sekali, lalu load lewat walk.
-// (walk butuh path file, bukan bytes langsung)
-func loadIcon() (*walk.Icon, error) {
-	tmpFile := filepath.Join(os.TempDir(), "marsa-print-watcher.ico")
-	if _, err := os.Stat(tmpFile); os.IsNotExist(err) {
-		if err := os.WriteFile(tmpFile, iconBytes, 0644); err != nil {
-			return nil, err
-		}
+// runOnTop menggantikan Dialog{...}.Run(nil): dialog dibuat dulu, lalu
+// dipasang handler Starting supaya langsung dibawa ke depan.
+func runOnTop(d Dialog, dlg **walk.Dialog) {
+	if err := d.Create(nil); err != nil {
+		log.Printf("gagal membuat dialog: %v", err)
+		walk.MsgBox(nil, "Error", "Gagal membuat jendela: "+err.Error(), walk.MsgBoxIconError|walk.MsgBoxStyle(win.MB_TOPMOST))
+		return
 	}
-	return walk.NewIconFromFile(tmpFile)
+	(*dlg).Starting().Attach(func() { bringToFront(*dlg) })
+	(*dlg).Run()
 }
 
-func main() {
-	// Build pakai -H windowsgui (tanpa console), jadi error harus ke file log
-	// supaya kalau tray tidak muncul, penyebabnya bisa dilihat di
-	// %APPDATA%\MarsaPrintWatcher\watcher.log
-	if dir, err := configDir(); err == nil {
-		if f, err := os.OpenFile(filepath.Join(dir, "watcher.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			log.SetOutput(f)
+// showSetupDialog dipanggil sekali di awal (kalau config belum diisi) atau
+// lewat menu tray "Setting". Jendela native biasa, OK-nya nyimpen config.
+func showSetupDialog(owner walk.Form, cfg *Config) {
+	defer owner.SetVisible(false) // pengaman: jendela utama harus tetap tersembunyi
+	var dlg *walk.Dialog
+	var serverEdit, pinEdit *walk.LineEdit
+
+	runOnTop(Dialog{
+		AssignTo: &dlg,
+		Title:    "Setup MARSA Print",
+		MinSize:  Size{Width: 360, Height: 180},
+		Layout:   VBox{},
+		Children: []Widget{
+			Label{Text: "URL Server:"},
+			LineEdit{AssignTo: &serverEdit, Text: cfg.ServerURL},
+			Label{Text: "PIN Guru (5 digit):"},
+			LineEdit{AssignTo: &pinEdit, Text: cfg.Pin, PasswordMode: true},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					PushButton{
+						Text: "Simpan",
+						OnClicked: func() {
+							cfg.ServerURL = serverEdit.Text()
+							cfg.Pin = pinEdit.Text()
+							_ = cfg.Save()
+							dlg.Accept()
+						},
+					},
+					PushButton{Text: "Batal", OnClicked: func() { dlg.Cancel() }},
+				},
+			},
+		},
+	}, &dlg)
+}
+
+// showPrintDialog muncul otomatis tiap ada PDF baru terdeteksi di folder.
+// Guru pilih printer dari dropdown + jumlah copy, lalu klik Cetak.
+func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, printers []TeacherPrinter) {
+	defer owner.SetVisible(false) // pengaman: jendela utama harus tetap tersembunyi
+	var dlg *walk.Dialog
+	var combo *walk.ComboBox
+	var copiesCombo *walk.ComboBox
+	var statusLbl *walk.Label
+	var printBtn, cancelBtn *walk.PushButton
+
+	names := make([]string, len(printers))
+	for i, p := range printers {
+		names[i] = fmt.Sprintf("%s  (%s)", p.Nama, p.Lokasi)
+	}
+
+	runOnTop(Dialog{
+		AssignTo: &dlg,
+		Title:    "Cetak Dokumen",
+		MinSize:  Size{Width: 380, Height: 220},
+		Layout:   VBox{},
+		Children: []Widget{
+			Label{Text: item.FileName, Font: Font{Family: "Segoe UI", PointSize: 10, Bold: true}},
+			Label{Text: "Pilih Printer:"},
+			ComboBox{AssignTo: &combo, Model: names, CurrentIndex: 0},
+			Label{Text: "Jumlah Copy (maks 10):"},
+			ComboBox{AssignTo: &copiesCombo, Model: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, CurrentIndex: 0},
+			Label{AssignTo: &statusLbl, Text: ""},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					PushButton{
+						AssignTo: &printBtn,
+						Text:     "Cetak",
+						OnClicked: func() {
+							idx := combo.CurrentIndex()
+							if idx < 0 {
+								return
+							}
+							printerID, err := strconv.Atoi(printers[idx].ID)
+							if err != nil {
+								walk.MsgBox(dlg, "Error", "ID printer tidak valid.", walk.MsgBoxIconError)
+								return
+							}
+							copies := copiesCombo.CurrentIndex() + 1
+
+							printBtn.SetEnabled(false)
+							cancelBtn.SetEnabled(false)
+							statusLbl.SetText("Mengirim ke server...")
+
+							go submitAndClose(owner, dlg, statusLbl, printBtn, cancelBtn, cfg, item, printerID, copies)
+						},
+					},
+					PushButton{AssignTo: &cancelBtn, Text: "Batal", OnClicked: func() { dlg.Cancel() }},
+				},
+			},
+		},
+	}, &dlg)
+}
+
+// submitAndClose jalan di goroutine terpisah (biar jendela tidak freeze
+// pas upload), lalu balik ke UI thread lewat Synchronize buat update dialog.
+func submitAndClose(owner *walk.MainWindow, dlg *walk.Dialog, statusLbl *walk.Label, printBtn, cancelBtn *walk.PushButton, cfg *Config, item *PendingFile, printerID, copies int) {
+	log.Printf("submit job: file=%s printer_id=%d copies=%d", item.FileName, printerID, copies)
+	result, err := SubmitJob(cfg.ServerURL, cfg.Pin, item.Path, printerID, copies)
+	if err != nil {
+		log.Printf("submit job GAGAL: %v", err)
+	} else {
+		log.Printf("submit job OK: job_id=%d status=%s", result.Job.ID, result.Job.Status)
+	}
+
+	owner.Synchronize(func() {
+		// Wajib: kalau dialog ditutup lewat tombol X selama upload berjalan,
+		// widget sudah dibuang dan SetText di bawah bisa panic.
+		defer recoverLog("submit selesai")
+		if err != nil {
+			statusLbl.SetText("Gagal: " + err.Error())
+			printBtn.SetEnabled(true)
+			cancelBtn.SetEnabled(true)
+			return
 		}
-	}
-	log.Printf("=== watcher start, build=%s ===", buildTag)
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("PANIC: %v", r)
+
+		dest := filepath.Join(cfg.SentDir, fmt.Sprintf("%d_%s", time.Now().Unix(), item.FileName))
+		if err := os.Rename(item.Path, dest); err != nil {
+			log.Printf("gagal memindahkan file ke arsip: %v", err)
 		}
-	}()
 
-	cfg, err := loadOrInitConfig()
-	if err != nil {
-		log.Fatalf("gagal load config: %v", err)
-	}
-
-	mw, err := walk.NewMainWindow()
-	if err != nil {
-		log.Fatal(err)
-	}
-	// Jendela utama cuma buat message loop + tray, tidak boleh kelihatan.
-	// Layout wajib di-set: tanpa layout, walk panic (nil pointer di
-	// CreateLayoutItem) setiap kali jendela ini menerima WM_WINDOWPOSCHANGED.
-	_ = mw.SetLayout(walk.NewVBoxLayout())
-	mw.SetVisible(false)
-
-	icon, err := loadIcon()
-	if err != nil {
-		log.Fatalf("gagal load icon: %v", err)
-	}
-
-	ni, err := walk.NewNotifyIcon(mw)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer ni.Dispose()
-	_ = ni.SetIcon(icon)
-	_ = ni.SetToolTip("MARSA Print")
-	_ = ni.SetVisible(true)
-
-	menu := ni.ContextMenu()
-
-	actFolder := walk.NewAction()
-	_ = actFolder.SetText("Buka Folder Cetak")
-	actFolder.Triggered().Attach(func() {
-		_ = exec.Command("explorer", cfg.WatchDir).Start()
+		walk.MsgBox(dlg, "Berhasil",
+			"Dokumen masuk antrean cetak ke "+result.Job.PrinterName+".\n\n"+
+				"Catatan: ini baru status ANTREAN, bukan konfirmasi sudah tercetak - "+
+				"terutama untuk printer di lokasi lain, prosesnya masih nunggu Agent di sana ambil & cetak job-nya.",
+			walk.MsgBoxIconInformation)
+		dlg.Accept()
 	})
-	_ = menu.Actions().Add(actFolder)
-
-	actSetup := walk.NewAction()
-	_ = actSetup.SetText("Setting")
-	actSetup.Triggered().Attach(func() {
-		defer recoverLog("menu setting")
-		showSetupDialog(mw, cfg)
-	})
-	_ = menu.Actions().Add(actSetup)
-
-	_ = menu.Actions().Add(walk.NewSeparatorAction())
-
-	actExit := walk.NewAction()
-	_ = actExit.SetText("Keluar")
-	actExit.Triggered().Attach(func() {
-		walk.App().Exit(0)
-	})
-	_ = menu.Actions().Add(actExit)
-
-	// Klik ganti ikon = buka Setting (perilaku umum tray app)
-	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
-		if button == walk.LeftButton {
-			defer recoverLog("klik tray")
-			showSetupDialog(mw, cfg)
-		}
-	})
-
-	// Jangan buka dialog sebelum message loop jalan; tunda lewat Synchronize
-	// supaya dialog muncul SETELAH mw.Run() aktif.
-	if !cfg.IsReady() {
-		mw.Synchronize(func() {
-			defer recoverLog("setup awal")
-			showSetupDialog(mw, cfg)
-		})
-	}
-
-	go watchFolder(cfg, mw)
-
-	mw.Run()
 }
