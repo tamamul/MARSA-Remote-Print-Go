@@ -27,6 +27,7 @@ func bringToFront(dlg *walk.Dialog) {
 func runOnTop(d Dialog, dlg **walk.Dialog) {
 	if err := d.Create(nil); err != nil {
 		log.Printf("gagal membuat dialog: %v", err)
+		walk.MsgBox(nil, "Error", "Gagal membuat jendela: "+err.Error(), walk.MsgBoxIconError|walk.MsgBoxStyle(win.MB_TOPMOST))
 		return
 	}
 	(*dlg).Starting().Attach(func() { bringToFront(*dlg) })
@@ -76,7 +77,7 @@ func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, pri
 	defer owner.SetVisible(false) // pengaman: jendela utama harus tetap tersembunyi
 	var dlg *walk.Dialog
 	var combo *walk.ComboBox
-	var copiesEdit *walk.NumberEdit
+	var copiesCombo *walk.ComboBox
 	var statusLbl *walk.Label
 	var printBtn, cancelBtn *walk.PushButton
 
@@ -94,8 +95,8 @@ func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, pri
 			Label{Text: item.FileName, Font: Font{Family: "Segoe UI", PointSize: 10, Bold: true}},
 			Label{Text: "Pilih Printer:"},
 			ComboBox{AssignTo: &combo, Model: names, CurrentIndex: 0},
-			Label{Text: "Jumlah Copy:"},
-			NumberEdit{AssignTo: &copiesEdit, Value: 1, MinValue: 1, MaxValue: 50, Decimals: 0},
+			Label{Text: "Jumlah Copy (maks 10):"},
+			ComboBox{AssignTo: &copiesCombo, Model: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, CurrentIndex: 0},
 			Label{AssignTo: &statusLbl, Text: ""},
 			Composite{
 				Layout: HBox{},
@@ -114,7 +115,7 @@ func showPrintDialog(owner *walk.MainWindow, cfg *Config, item *PendingFile, pri
 								walk.MsgBox(dlg, "Error", "ID printer tidak valid.", walk.MsgBoxIconError)
 								return
 							}
-							copies := int(copiesEdit.Value())
+							copies := copiesCombo.CurrentIndex() + 1
 
 							printBtn.SetEnabled(false)
 							cancelBtn.SetEnabled(false)
