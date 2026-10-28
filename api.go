@@ -130,3 +130,36 @@ func truncate(s string, max int) string {
 	}
 	return s[:max] + "..."
 }
+
+// JobStatus: isi balasan GET /api/teacher/jobs/status/{token}
+type JobStatus struct {
+	Status       string `json:"status"` // pending | printing | done | failed
+	ErrorMessage string `json:"error_message"`
+	PrinterName  string `json:"printer_name"`
+}
+
+type statusResponse struct {
+	OK    bool      `json:"ok"`
+	Error string    `json:"error"`
+	Job   JobStatus `json:"job"`
+}
+
+// FetchJobStatus cek status satu job lewat token rahasia dari status_url.
+func FetchJobStatus(serverURL, token string) (*JobStatus, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(serverURL + "/api/teacher/jobs/status/" + token)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var result statusResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("balasan status tidak terbaca (HTTP %d): %s", resp.StatusCode, truncate(string(body), 120))
+	}
+	if !result.OK {
+		return nil, fmt.Errorf("server: %s (HTTP %d)", result.Error, resp.StatusCode)
+	}
+	return &result.Job, nil
+}
