@@ -22,7 +22,7 @@ func recoverLog(where string) {
 
 // buildTag: ubah tiap kali ada perbaikan, supaya watcher.log menunjukkan
 // versi build mana yang sebenarnya sedang jalan.
-const buildTag = "2026-10-27-owner-nil-layout"
+const buildTag = "2026-10-27-topmost-dialog"
 
 //go:embed icon.ico
 var iconBytes []byte
