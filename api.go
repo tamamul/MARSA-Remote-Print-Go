@@ -18,6 +18,7 @@ type TeacherPrinter struct {
 	ID     string `json:"id"`
 	Nama   string `json:"nama_printer"`
 	Lokasi string `json:"lokasi"`
+	PageRange   string `json:"page_range"`
 }
 
 type printersResponse struct {
